@@ -26,8 +26,8 @@ AUDIO_SERVER_PORT = 8300
 print u"[INSTALL] Installation commands:"
 print u"[INSTALL] npm install -g http-server"
 print u"[INSTALL] npm install -g forever"
-print u"[INSTALL] mkdir -p /var/lib/snips/snips-skill-jukebox/audio"
-print u"[INSTALL] forever start -c http-server /var/lib/snips/snips-skill-jukebox/audio -a 0.0.0.0 -p " + str(AUDIO_SERVER_PORT)
+print u"[INSTALL] mkdir -p /var/lib/snips/skills/snips-skill-jukebox/audio"
+print u"[INSTALL] forever start -c http-server /var/lib/snips/skills/snips-skill-jukebox/audio -a 0.0.0.0 -p " + str(AUDIO_SERVER_PORT)
 
 class Jukebox(object):
     """Class used to wrap action code with mqtt connection
