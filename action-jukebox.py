@@ -39,16 +39,20 @@ class Jukebox(object):
         self.tmpClient.on_message = self.on_message
         self.tmpClient.on_log = self.on_log
         self.tmpClient.connect(MQTT_IP_ADDR, MQTT_PORT)
-        self.tmpClient.subscribe("hermes/intent/jierka:searchMusic")
+        self.tmpClient.subscribe("hermes/intent/#")
         self.tmpClient.loop_forever()
 
     def on_message(self, client, userdata, message):
         topic = message.topic
         msg = str(message.payload.decode("utf-8", "ignore"))
         msgJson = json.loads(msg)
-        print topic
 
-        if topic == "hermes/intent/jierka:searchMusic":
+        intent_name = msgJson["intent"]["intentName"]
+
+        if ':' in intent_name:
+            intent_name = intent_name.split(":")[1]
+
+        if intent_name == "searchMusic":
             self.searchMusicAction(payload=msgJson)
 
     def on_log(self, client, userdata, level, buf):
