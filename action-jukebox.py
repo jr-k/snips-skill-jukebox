@@ -1,33 +1,23 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 from snipsTools import SnipsConfigParser
-from hermes_python.hermes import Hermes
-from hermes_python.ontology import *
-import paho.mqtt.client as paho
 import paho.mqtt.publish as publish
+import paho.mqtt.client as paho
+import time
 import json
+import requests
+import urllib
 import os
 import random
-from bs4 import BeautifulSoup as bs
-import requests
+import re
 from pytube import YouTube
-import urllib
 
 CONFIG_INI = "config.ini"
-
 MQTT_IP_ADDR = "localhost"
 MQTT_PORT = 1883
 MQTT_ADDR = "{}:{}".format(MQTT_IP_ADDR, str(MQTT_PORT))
-
 ACK = [u"Très bien", "OK", "daccord", u"C'est fait", u"Pas de problème", "entendu"]
-
-AUDIO_SERVER_PORT = 8300
-
-print u"[INSTALL] Installation commands:"
-print u"[INSTALL] npm install -g http-server"
-print u"[INSTALL] npm install -g forever"
-print u"[INSTALL] mkdir -p /var/lib/snips/skills/snips-skill-jukebox/audio"
-print u"[INSTALL] forever start -c http-server /var/lib/snips/skills/snips-skill-jukebox/audio -a 0.0.0.0 -p " + str(AUDIO_SERVER_PORT)
+regex = r"<a\b(?=[^>]* class=\"[^\"]*(?<=[\" ])yt-uix-tile-link[\" ])(?=[^>]* href=\"([^\"]*))"
 
 class Jukebox(object):
     """Class used to wrap action code with mqtt connection
@@ -41,18 +31,34 @@ class Jukebox(object):
         except :
             self.config = None
 
+        self.publicServerAudioDir = self.config["global"]["artifice_public_server_audio_dir"]
+        self.publicServerPort = self.config["global"]["artifice_public_server_port"]
+
         # start listening to MQTT
-        self.start_blocking()
+        self.tmpClient = paho.Client("snips-skill-jukebox-" + str(int(round(time.time() * 1000))))
+        self.tmpClient.on_message = self.on_message
+        self.tmpClient.on_log = self.on_log
+        self.tmpClient.connect(MQTT_IP_ADDR, MQTT_PORT)
+        self.tmpClient.subscribe("hermes/intent/jierka:searchMusic")
+        self.tmpClient.loop_forever()
 
-    # --> Sub callback function, one per intent
-    def setSearchMusicCallback(self, hermes, intent_message):
-        # terminate the session first if not continue
-        hermes.publish_end_session(intent_message.session_id, "")
+    def on_message(self, client, userdata, message):
+        topic = message.topic
+        msg = str(message.payload.decode("utf-8", "ignore"))
+        msgJson = json.loads(msg)
+        print topic
 
-        # action code goes here...
-        print '[Received] intent: {}'.format(intent_message.intent.intent_name)
+        if topic == "hermes/intent/jierka:searchMusic":
+            self.searchMusicAction(payload=msgJson)
 
-        musicQuery = intent_message.input.lower().replace(" ", "+")
+    def on_log(self, client, userdata, level, buf):
+        if level != 16:
+            print("log: ", buf)
+
+    def searchMusicAction(self, payload):
+        print "[searchMusicAction]"
+        self.tmpClient.publish("hermes/dialogueManager/endSession", json.dumps({'sessionId': payload["sessionId"], "text": "daccord"}))
+        musicQuery = payload["input"].replace(" ", "+")
 
         base = "https://www.youtube.com/results?search_query="
         qstring = musicQuery
@@ -61,55 +67,49 @@ class Jukebox(object):
 
         r = requests.get(base + qstring)
         page = r.text
-        soup = bs(page, 'html.parser')
 
-        vids = soup.findAll('a', attrs={'class': 'yt-uix-tile-link'})
-
+        matches = re.finditer(regex, page, re.MULTILINE)
         videolist = []
 
-        for v in vids:
-            tmp = 'https://www.youtube.com' + v['href']
-            videolist.append(tmp)
+        for matchNum, match in enumerate(matches, start=1):
+            if "list" not in match.group(1):
+                tmp = 'https://www.youtube.com' + match.group(1)
+                videolist.append(tmp)
 
         if len(videolist) == 0:
-            hermes.publish_start_session_notification(intent_message.site_id, u"Je n'ai pas trouvé de musique correspondant à cette recherche", "")
+            self.tmpClient.publish("hermes/dialogueManager/startSession", json.dumps({"siteId": payload["siteId"], "init": {"type": "notification", "text": u"Je n'ai pas trouvé de musique correspondant à cette recherche"}}))
             return False
 
         item = videolist[0]
+
+        # print "Wait..."
+        # time.sleep(5)
+        # print "Wait ended"
+
         streams = YouTube(item).streams.filter(progressive=True, file_extension='mp4').order_by('resolution')
 
         if streams.count() == 0:
-            hermes.publish_start_session_notification(intent_message.site_id, u"Une erreur est survenue",  "")
+            self.tmpClient.publish("hermes/dialogueManager/startSession", json.dumps({"siteId": payload["siteId"], "init": {"type": "notification", "text": u"Une erreur est survenue"}}))
             return False
 
         print "Music found: " + item
 
-        if not os.path.isfile('audio/'+streams.first().default_filename):
+        if not os.path.isfile(self.publicServerAudioDir + '/' + streams.first().default_filename):
             streams.first().download()
-            os.rename(streams.first().default_filename, 'audio/'+streams.first().default_filename)
+            os.rename(streams.first().default_filename, self.publicServerAudioDir + '/' + streams.first().default_filename)
 
         media = urllib.pathname2url(streams.first().default_filename)
 
+        # medias = ["Kaaris%20-%20Or%20Noir.mp4", "Jul%20-%20On%20Mappelle%20Lovni%20%20Clip%20Officiel%20%202016.mp4"]
+        # media = medias[random.randint(0, len(medias) - 1)]
+
         print "Broadcast media: " + media
 
-        publish.single('hermes/artifice/media/audio/play', payload=json.dumps({'siteId': intent_message.site_id, 'port': AUDIO_SERVER_PORT, 'media': media}), hostname=MQTT_IP_ADDR, port=MQTT_PORT)
+        self.tmpClient.publish("hermes/artifice/media/audio/play", json.dumps({'siteId': payload["siteId"], "port": self.publicServerPort, 'media': 'audio/' + media}))
 
-        # if need to speak the execution result by tts
-        hermes.publish_start_session_notification(intent_message.site_id, ACK[random.randint(0,len(ACK) - 1)], "")
-
-    # --> Master callback function, triggered everytime an intent is recognized
-    def master_intent_callback(self,hermes, intent_message):
-
-        intent_name = intent_message.intent.intent_name
-        if ':' in intent_name:
-            intent_name = intent_name.split(":")[1]
-        if intent_name == 'searchMusic':
-            self.setSearchMusicCallback(hermes, intent_message)
-
-    # --> Register callback function and start MQTT
-    def start_blocking(self):
-        with Hermes(MQTT_ADDR) as h:
-            h.subscribe_intents(self.master_intent_callback).start()
 
 if __name__ == "__main__":
     Jukebox()
+
+
+

@@ -1,7 +1,5 @@
 hermes_python>=0.1
 paho-mqtt
-beautifulsoup
-bs4
 requests
 pytube
 pychromecast
