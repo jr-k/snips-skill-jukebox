@@ -62,7 +62,9 @@ class Jukebox(object):
     def searchMusicAction(self, payload):
         print "[searchMusicAction]"
         self.tmpClient.publish("hermes/dialogueManager/endSession", json.dumps({'sessionId': payload["sessionId"], "text": "daccord"}))
-        musicQuery = payload["input"].replace(" ", "+")
+
+        input = payload["input"].replace('jouer', '').replace('joue','').replace('lancer','').replace('lance','').replace('la musique', '')
+        musicQuery = input.replace(" ", "+")
 
         base = "https://www.youtube.com/results?search_query="
         qstring = musicQuery
